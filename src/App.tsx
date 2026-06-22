@@ -8,7 +8,10 @@ import TopQueues from './components/TopQueues'
 import QueueTable from './components/QueueTable'
 import HealthAlerts from './components/HealthAlerts'
 import OperationHealth from './components/OperationHealth'
+import BinanceLayout from './components/BinanceLayout'
 import './index.css'
+
+type Layout = 'dashboard' | 'exchange'
 
 export default function App() {
   const [data, setData] = useState<QueuesResponse | null>(null)
@@ -19,6 +22,7 @@ export default function App() {
   const [pageSize, setPageSize] = useState(20)
   const [refreshInterval, setRefreshInterval] = useState(5000)
   const [paused, setPaused] = useState(false)
+  const [layout, setLayout] = useState<Layout>('dashboard')
   const prevQueuesRef = useRef<Queue[]>([])
   const historyRef = useRef<QueueHistory>(new Map())
   const [, forceRender] = useState(0)
@@ -82,6 +86,44 @@ export default function App() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {/* Layout switcher */}
+          <div className="flex rounded-lg border border-zinc-700 overflow-hidden">
+            <button
+              onClick={() => setLayout('dashboard')}
+              title="Dashboard görünümü"
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition ${
+                layout === 'dashboard'
+                  ? 'bg-zinc-700 text-white'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <rect x="1" y="1" width="5" height="5" rx="1" fill="currentColor" opacity="0.9"/>
+                <rect x="8" y="1" width="5" height="5" rx="1" fill="currentColor" opacity="0.9"/>
+                <rect x="1" y="8" width="5" height="5" rx="1" fill="currentColor" opacity="0.9"/>
+                <rect x="8" y="8" width="5" height="5" rx="1" fill="currentColor" opacity="0.9"/>
+              </svg>
+              Dashboard
+            </button>
+            <div className="w-px bg-zinc-700" />
+            <button
+              onClick={() => setLayout('exchange')}
+              title="Borsa görünümü"
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition ${
+                layout === 'exchange'
+                  ? 'bg-zinc-700 text-white'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <rect x="1" y="1" width="3" height="12" rx="1" fill="currentColor" opacity="0.9"/>
+                <rect x="6" y="4" width="7" height="9" rx="1" fill="currentColor" opacity="0.9"/>
+                <rect x="6" y="1" width="7" height="2" rx="1" fill="currentColor" opacity="0.5"/>
+              </svg>
+              Borsa
+            </button>
+          </div>
+
           <select
             className="bg-zinc-800 border border-zinc-700 text-sm text-white rounded px-3 py-1.5"
             value={refreshInterval}
@@ -105,55 +147,59 @@ export default function App() {
         </div>
       </div>
 
-      <div className="mb-6">
-        <StatsBar
-          totalQueues={data?.total_count ?? 0}
-          totalReady={totalReady}
-          totalUnacked={totalUnacked}
-          totalConsumers={totalConsumers}
-          totalArrived={totalArrived}
-          totalProcessed={totalProcessed}
-          intervalLabel={`${refreshInterval / 1000}s`}
-        />
-      </div>
-
-      <TopQueues queues={enriched} history={historyRef.current} />
-
-      {!loading && enriched.length > 0 && (
-        <div className="mb-6">
-          <OperationHealth queues={enriched} />
-        </div>
-      )}
-
-      <HealthAlerts queues={enriched} />
-
-      <div className="mb-4 flex items-center gap-3">
-        <input
-          type="text"
-          placeholder="Kuyruk adı veya satıcı adına göre filtrele..."
-          className="bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-sm text-white placeholder-zinc-500 w-full max-w-sm focus:outline-none focus:border-blue-500 transition"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
-        <select
-          className="bg-zinc-800 border border-zinc-700 text-sm text-white rounded-lg px-3 py-2 shrink-0"
-          value={pageSize}
-          onChange={(e) => setPageSize(Number(e.target.value))}
-        >
-          {[5, 10, 20, 30, 50, 100].map((n) => (
-            <option key={n} value={n}>{n} kuyruk</option>
-          ))}
-        </select>
-      </div>
-
       {error ? (
-        <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-4">
+        <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-4">
           Hata: {error}
         </div>
       ) : loading ? (
         <div className="text-zinc-400 text-sm text-center py-20">Kuyruklar yükleniyor...</div>
+      ) : layout === 'exchange' ? (
+        <BinanceLayout queues={enriched} history={historyRef.current} intervalMs={refreshInterval} />
       ) : (
-        <QueueTable queues={enriched} history={historyRef.current} filter={filter} intervalMs={refreshInterval} pageSize={pageSize} />
+        <>
+          <div className="mb-6">
+            <StatsBar
+              totalQueues={data?.total_count ?? 0}
+              totalReady={totalReady}
+              totalUnacked={totalUnacked}
+              totalConsumers={totalConsumers}
+              totalArrived={totalArrived}
+              totalProcessed={totalProcessed}
+              intervalLabel={`${refreshInterval / 1000}s`}
+            />
+          </div>
+
+          <TopQueues queues={enriched} history={historyRef.current} />
+
+          {enriched.length > 0 && (
+            <div className="mb-6">
+              <OperationHealth queues={enriched} />
+            </div>
+          )}
+
+          <HealthAlerts queues={enriched} />
+
+          <div className="mb-4 flex items-center gap-3">
+            <input
+              type="text"
+              placeholder="Kuyruk adı veya satıcı adına göre filtrele..."
+              className="bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 text-sm text-white placeholder-zinc-500 w-full max-w-sm focus:outline-none focus:border-blue-500 transition"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+            <select
+              className="bg-zinc-800 border border-zinc-700 text-sm text-white rounded-lg px-3 py-2 shrink-0"
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+            >
+              {[5, 10, 20, 30, 50, 100].map((n) => (
+                <option key={n} value={n}>{n} kuyruk</option>
+              ))}
+            </select>
+          </div>
+
+          <QueueTable queues={enriched} history={historyRef.current} filter={filter} intervalMs={refreshInterval} pageSize={pageSize} />
+        </>
       )}
     </main>
   )
