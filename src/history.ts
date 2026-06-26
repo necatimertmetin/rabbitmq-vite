@@ -7,7 +7,7 @@ export interface HistoryPoint {
 
 export type QueueHistory = Map<string, HistoryPoint[]>
 
-const MAX_POINTS = 200
+const MAX_POINTS = 500
 
 export function updateHistory(
   history: QueueHistory,

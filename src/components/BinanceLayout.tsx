@@ -16,6 +16,14 @@ const MUT  = '#848e9c'
 // ── Helpers ────────────────────────────────────────────────────────────────
 function r2(v?: number) { return (v ?? 0).toFixed(2) }
 
+function formatTs(ts: number, rangeMs: number): string {
+  const d = new Date(ts)
+  const h = String(d.getHours()).padStart(2, '0')
+  const m = String(d.getMinutes()).padStart(2, '0')
+  const s = String(d.getSeconds()).padStart(2, '0')
+  return rangeMs < 30 * 60_000 ? `${h}:${m}:${s}` : `${h}:${m}`
+}
+
 function fmt(n: number, digits = 2) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(digits)}M`
   if (n >= 1_000)     return `${(n / 1_000).toFixed(digits)}K`
@@ -67,15 +75,17 @@ function buildCandles(data: number[], rates: number[]): Candle[] {
 }
 
 // ── Candlestick chart ──────────────────────────────────────────────────────
-function CandleChart({ data, rates }: { data: number[]; rates: number[] }) {
+function CandleChart({ data, rates, timestamps }: { data: number[]; rates: number[]; timestamps: number[] }) {
   if (data.length < 4) {
     return <div className="flex-1 flex items-center justify-center text-sm" style={{ color: MUT }}>Veri biriktirilıyor…</div>
   }
 
-  const candles = buildCandles(data, rates)
+  const candles   = buildCandles(data, rates)
+  const candleTs  = timestamps.slice(1) // candle i closes at timestamps[i+1]
+  const rangeMs   = candleTs.length > 1 ? candleTs[candleTs.length - 1] - candleTs[0] : 0
 
   const W = 1000; const H = 220
-  const padT = 10; const padB = 10; const padL = 6; const padR = 76
+  const padT = 10; const padB = 30; const padL = 6; const padR = 76
   const cW = W - padL - padR; const cH = H - padT - padB
 
   const allVals  = candles.flatMap(c => [c.high, c.low])
@@ -95,8 +105,13 @@ function CandleChart({ data, rates }: { data: number[]; rates: number[] }) {
   const maxVol = Math.max(...candles.map(c => c.vol), 1)
   const VOL_H  = 42
 
-  // grid price levels
   const levels = [0, 0.25, 0.5, 0.75, 1].map(p => ({ pct: p, val: maxV - p * range }))
+
+  // X-axis: pick up to 7 evenly spaced label indices
+  const N_LABELS = 7
+  const step = Math.max(1, Math.floor(candles.length / N_LABELS))
+  const xLabelIdxs: number[] = []
+  for (let i = 0; i < candles.length; i += step) xLabelIdxs.push(i)
 
   return (
     <div className="flex-1 flex flex-col min-h-0 px-2 pt-2 pb-1">
@@ -114,6 +129,9 @@ function CandleChart({ data, rates }: { data: number[]; rates: number[] }) {
             )
           })}
 
+          {/* X axis baseline */}
+          <line x1={padL} y1={padT + cH} x2={W - padR} y2={padT + cH} stroke="#1e2329" strokeWidth="1" />
+
           {/* Last price dashed line */}
           <line x1={padL} y1={lastY} x2={W - padR} y2={lastY}
                 stroke={lastCol} strokeWidth="0.8" strokeDasharray="5 4" opacity="0.75" />
@@ -127,11 +145,22 @@ function CandleChart({ data, rates }: { data: number[]; rates: number[] }) {
             const bH  = Math.max(1.5, bot - top)
             return (
               <g key={i}>
-                {/* Wick */}
                 <line x1={x} y1={yS(c.high)} x2={x} y2={yS(c.low)} stroke={col} strokeWidth="1.2" />
-                {/* Body */}
-                <rect x={x - bW / 2} y={top} width={bW} height={bH}
-                      fill={col} opacity="0.92" rx="0.5" />
+                <rect x={x - bW / 2} y={top} width={bW} height={bH} fill={col} opacity="0.92" rx="0.5" />
+              </g>
+            )
+          })}
+
+          {/* X-axis time labels */}
+          {xLabelIdxs.map(i => {
+            if (!candleTs[i]) return null
+            const x = xS(i)
+            return (
+              <g key={i}>
+                <line x1={x} y1={padT + cH} x2={x} y2={padT + cH + 5} stroke="#2b2f35" strokeWidth="1" />
+                <text x={x} y={H - 4} textAnchor="middle" fill={MUT} fontSize="14" style={{ fontFamily: 'monospace' }}>
+                  {formatTs(candleTs[i], rangeMs)}
+                </text>
               </g>
             )
           })}
@@ -165,30 +194,39 @@ function CandleChart({ data, rates }: { data: number[]; rates: number[] }) {
 }
 
 // ── Area chart (fallback / toggle) ─────────────────────────────────────────
-function AreaChart({ data, rates }: { data: number[]; rates: number[] }) {
+function AreaChart({ data, rates, timestamps }: { data: number[]; rates: number[]; timestamps: number[] }) {
   if (data.length < 2) return <div className="flex-1 flex items-center justify-center text-sm" style={{ color: MUT }}>Veri biriktirilıyor…</div>
 
-  const W = 1000; const H = 220; const pad = 10; const padR = 76
-  const cW = W - pad - padR
+  const rangeMs = timestamps.length > 1 ? timestamps[timestamps.length - 1] - timestamps[0] : 0
+
+  const W = 1000; const H = 220
+  const padT = 10; const padB = 30; const padL = 10; const padR = 76
+  const cW = W - padL - padR; const cH = H - padT - padB
 
   const minV = Math.min(...data); const maxV = Math.max(...data); const range = maxV - minV || 1
-  const yS = (v: number) => pad + (1 - (v - minV) / range) * (H - pad * 2)
-  const xS = (i: number) => pad + (i / (data.length - 1)) * cW
+  const yS = (v: number) => padT + (1 - (v - minV) / range) * cH
+  const xS = (i: number) => padL + (i / (data.length - 1)) * cW
 
   const pts = data.map((v, i): [number, number] => [xS(i), yS(v)])
   const line = pts.map(([x, y], i) => `${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
-  const fill = `${line} L${pts[pts.length-1][0].toFixed(1)},${H-pad} L${pts[0][0].toFixed(1)},${H-pad} Z`
+  const fill = `${line} L${pts[pts.length-1][0].toFixed(1)},${padT+cH} L${pts[0][0].toFixed(1)},${padT+cH} Z`
 
   const last   = data[data.length - 1]
   const prev   = data[data.length - 2]
   const col    = last > prev ? R : last < prev ? G : MUT
   const lastY  = yS(last)
-  const lastYP = ((lastY - pad) / (H - pad * 2)) * 100
+  const lastYP = ((lastY - padT) / cH) * 100
 
   const maxVol = Math.max(...rates, 1)
   const VOL_H  = 42
 
   const levels = [0, 0.25, 0.5, 0.75, 1].map(p => ({ pct: p, val: maxV - p * range }))
+
+  // X-axis: pick up to 7 evenly spaced label indices
+  const N_LABELS = 7
+  const step = Math.max(1, Math.floor(data.length / N_LABELS))
+  const xLabelIdxs: number[] = []
+  for (let i = 0; i < data.length; i += step) xLabelIdxs.push(i)
 
   return (
     <div className="flex-1 flex flex-col min-h-0 px-2 pt-2 pb-1">
@@ -201,17 +239,35 @@ function AreaChart({ data, rates }: { data: number[]; rates: number[] }) {
             </linearGradient>
           </defs>
           {levels.map(({ pct, val }) => {
-            const y = pad + pct * (H - pad * 2)
+            const y = padT + pct * cH
             return (
               <g key={pct}>
-                <line x1={pad} y1={y} x2={W - padR} y2={y} stroke="#1e2329" strokeWidth="1"/>
+                <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="#1e2329" strokeWidth="1"/>
                 <text x={W - padR + 4} y={y + 5} fill={MUT} fontSize="18" style={{ fontFamily: 'monospace' }}>{fmt(val)}</text>
               </g>
             )
           })}
-          <line x1={pad} y1={lastY} x2={W-padR} y2={lastY} stroke={col} strokeWidth="0.8" strokeDasharray="5 4" opacity="0.7"/>
+
+          {/* X axis baseline */}
+          <line x1={padL} y1={padT + cH} x2={W - padR} y2={padT + cH} stroke="#1e2329" strokeWidth="1"/>
+
+          <line x1={padL} y1={lastY} x2={W-padR} y2={lastY} stroke={col} strokeWidth="0.8" strokeDasharray="5 4" opacity="0.7"/>
           <path d={fill} fill="url(#ag2)"/>
           <path d={line} fill="none" stroke={col} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+
+          {/* X-axis time labels */}
+          {xLabelIdxs.map(i => {
+            if (!timestamps[i]) return null
+            const x = xS(i)
+            return (
+              <g key={i}>
+                <line x1={x} y1={padT + cH} x2={x} y2={padT + cH + 5} stroke="#2b2f35" strokeWidth="1"/>
+                <text x={x} y={H - 4} textAnchor="middle" fill={MUT} fontSize="14" style={{ fontFamily: 'monospace' }}>
+                  {formatTs(timestamps[i], rangeMs)}
+                </text>
+              </g>
+            )
+          })}
         </svg>
         <div className="absolute right-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
              style={{ top: `${lastYP}%`, transform: 'translateY(-50%)', background: col, color: '#000', minWidth: 52, textAlign: 'center' }}>
@@ -222,7 +278,7 @@ function AreaChart({ data, rates }: { data: number[]; rates: number[] }) {
         <div className="shrink-0" style={{ height: VOL_H }}>
           <svg width="100%" height="100%" viewBox={`0 0 ${W} ${VOL_H}`} preserveAspectRatio="none" style={{ display: 'block' }}>
             {rates.map((v, i) => {
-              const x  = pad + (i / (rates.length - 1)) * cW
+              const x  = padL + (i / (rates.length - 1)) * cW
               const bH = Math.max(1, (v / maxVol) * (VOL_H - 4))
               return <rect key={i} x={x-4} y={VOL_H-bH} width={8} height={bH} fill={G} opacity="0.5" rx="0.5"/>
             })}
@@ -277,6 +333,15 @@ function PairRow({ q, selected, onClick }: { q: QueueWithDelta; selected: boolea
 
 type LTab = 'ALL' | 'MAIN' | 'DLQ' | 'RETRY' | 'SPAPI'
 type ChartType = 'candle' | 'area'
+type TimeWindow = '5m' | '15m' | '30m' | '1h' | 'all'
+
+const TIME_WINDOWS: { label: string; value: TimeWindow; ms: number | null }[] = [
+  { label: '5m',  value: '5m',  ms: 5  * 60_000 },
+  { label: '15m', value: '15m', ms: 15 * 60_000 },
+  { label: '30m', value: '30m', ms: 30 * 60_000 },
+  { label: '1sa', value: '1h',  ms: 60 * 60_000 },
+  { label: 'Tümü', value: 'all', ms: null },
+]
 
 // ── Main ───────────────────────────────────────────────────────────────────
 export default function BinanceLayout({ queues, history, intervalMs }: {
@@ -286,6 +351,7 @@ export default function BinanceLayout({ queues, history, intervalMs }: {
   const [search,     setSearch]     = useState('')
   const [lTab,       setLTab]       = useState<LTab>('ALL')
   const [chartType,  setChartType]  = useState<ChartType>('candle')
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>('all')
 
   const q    = queues.find(x => `${x.vhost}/${x.name}` === selKey) ?? queues[0] ?? null
   const ack  = q?.message_stats?.ack_details?.rate    ?? 0
@@ -304,9 +370,14 @@ export default function BinanceLayout({ queues, history, intervalMs }: {
   const askRows = asks.map(x => { cumAsk += x.messages_ready; return { x, pct: Math.min(98, (x.messages_ready / maxAsk) * 100) } })
 
   // Chart
-  const hist   = q ? (history.get(`${q.vhost}/${q.name}`) ?? []) : []
-  const chart  = hist.map(p => p.ready)
-  const rates  = hist.map(p => p.arrived)
+  const allHist  = q ? (history.get(`${q.vhost}/${q.name}`) ?? []) : []
+  const twCfg    = TIME_WINDOWS.find(w => w.value === timeWindow)!
+  const hist     = twCfg.ms == null
+    ? allHist
+    : allHist.filter(p => p.ts >= Date.now() - twCfg.ms!)
+  const chart      = hist.map(p => p.ready)
+  const rates      = hist.map(p => p.arrived)
+  const timestamps = hist.map(p => p.ts)
 
   const ma7  = chart.length >= 7  ? chart.slice(-7).reduce((a,b)=>a+b,0)/7   : null
   const ma25 = chart.length >= 25 ? chart.slice(-25).reduce((a,b)=>a+b,0)/25 : null
@@ -431,7 +502,7 @@ export default function BinanceLayout({ queues, history, intervalMs }: {
         {/* ── Center: Chart ──────────────────────────────────────────────── */}
         <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0, background:BG }}>
           {/* Toolbar */}
-          <div style={{ flexShrink:0, display:'flex', alignItems:'center', gap:6, padding:'5px 10px', borderBottom:`1px solid ${BRD}` }}>
+          <div style={{ flexShrink:0, display:'flex', alignItems:'center', gap:6, padding:'5px 10px', borderBottom:`1px solid ${BRD}`, flexWrap:'wrap' }}>
             {/* Chart type toggle */}
             <div style={{ display:'flex', borderRadius:3, overflow:'hidden', border:`1px solid ${BRD}` }}>
               {(['candle','area'] as ChartType[]).map(t => (
@@ -439,12 +510,28 @@ export default function BinanceLayout({ queues, history, intervalMs }: {
                         style={{ padding:'2px 8px', fontSize:11, fontWeight:500, cursor:'pointer', border:'none',
                                  background: chartType===t ? '#2b2f35' : 'transparent',
                                  color: chartType===t ? TX : MUT }}>
-                  {t === 'candle' ? '🕯 Mum' : '📈 Alan'}
+                  {t === 'candle' ? 'Mum' : 'Alan'}
                 </button>
               ))}
             </div>
-            <span style={{ fontSize:11, color:MUT }}>|</span>
+
+            <span style={{ fontSize:11, color:BRD }}>│</span>
+
+            {/* Time window buttons */}
+            <div style={{ display:'flex', borderRadius:3, overflow:'hidden', border:`1px solid ${BRD}` }}>
+              {TIME_WINDOWS.map(w => (
+                <button key={w.value} onClick={() => setTimeWindow(w.value)}
+                        style={{ padding:'2px 8px', fontSize:11, fontWeight:500, cursor:'pointer', border:'none',
+                                 background: timeWindow===w.value ? '#2b2f35' : 'transparent',
+                                 color: timeWindow===w.value ? Y : MUT }}>
+                  {w.label}
+                </button>
+              ))}
+            </div>
+
+            <span style={{ fontSize:11, color:BRD }}>│</span>
             <span style={{ fontSize:11, padding:'2px 7px', borderRadius:3, background:'#2b2f35', color:TX }}>{intervalMs/1000}s</span>
+
             <div style={{ marginLeft:'auto', display:'flex', gap:16, fontSize:11, color:MUT }}>
               {ma7  != null && <span>MA(7): <span style={{ color:Y }}>{fmt(ma7)}</span></span>}
               {ma25 != null && <span>MA(25): <span style={{ color:'#8358f5' }}>{fmt(ma25)}</span></span>}
@@ -455,8 +542,8 @@ export default function BinanceLayout({ queues, history, intervalMs }: {
           {/* Chart */}
           <div style={{ flex:1, display:'flex', flexDirection:'column', minHeight:0 }}>
             {chartType === 'candle'
-              ? <CandleChart data={chart} rates={rates} />
-              : <AreaChart   data={chart} rates={rates} />
+              ? <CandleChart data={chart} rates={rates} timestamps={timestamps} />
+              : <AreaChart   data={chart} rates={rates} timestamps={timestamps} />
             }
           </div>
 
